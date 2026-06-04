@@ -168,10 +168,18 @@ class ModelInfoPanel(Static):
         self.query_one("#model-id", Label).update(f"[bold cyan]{model_id}[/bold cyan]")
         extras = []
         if info.max_model_len:
-            extras.append(f"ctx={info.max_model_len}")
+            extras.append(f"ctx {info.max_model_len}")
         if info.tensor_parallel_size:
-            extras.append(f"tp={info.tensor_parallel_size}")
-        self.query_one("#model-extra", Label).update("  ".join(extras) if extras else "")
+            extras.append(f"tp {info.tensor_parallel_size}")
+        if info.cache_dtype:
+            extras.append(f"kv {escape(info.cache_dtype)}")
+        if info.num_gpu_blocks:
+            extras.append(f"{info.num_gpu_blocks} blks")
+        if info.gpu_memory_utilization:
+            extras.append(f"util {info.gpu_memory_utilization:.0%}")
+        self.query_one("#model-extra", Label).update(
+            f"[dim]{' · '.join(extras)}[/dim]" if extras else ""
+        )
 
 
 class VllmMonitorApp(App):

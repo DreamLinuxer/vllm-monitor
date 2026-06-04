@@ -30,6 +30,11 @@ class ModelInfo:
     model_id: str = "unknown"
     max_model_len: Optional[int] = None
     tensor_parallel_size: Optional[int] = None
+    # From vllm:cache_config_info labels (when present)
+    num_gpu_blocks: Optional[int] = None
+    block_size: Optional[int] = None
+    gpu_memory_utilization: Optional[float] = None
+    cache_dtype: Optional[str] = None
 
 
 @dataclass
@@ -136,8 +141,12 @@ def _hist_sum_count(raw: dict[str, float], name: str) -> tuple[float, float]:
 
 
 def _extract_label(raw: dict[str, float], label: str) -> Optional[str]:
-    """Return the first value of `label` found across all metric keys."""
-    pat = re.compile(rf'{re.escape(label)}="([^"]*)"')
+    """Return the first value of `label` found across all metric keys.
+
+    Anchored on a label boundary ({ or ,) so e.g. ``block_size`` does not
+    match inside ``hash_block_size``.
+    """
+    pat = re.compile(r'[{,]' + re.escape(label) + r'="([^"]*)"')
     for key in raw:
         m = pat.search(key)
         if m and m.group(1):
@@ -286,10 +295,28 @@ class MetricsPoller:
 
         # Model name fallback: when /v1/models is unauthorized, every metric
         # carries a model_name="..." label we can read instead.
-        if m.model_info.model_id in ("", "unknown"):
+        info = m.model_info
+        if info.model_id in ("", "unknown"):
             label_model = _extract_label(raw, "model_name")
             if label_model:
-                m.model_info.model_id = label_model
+                info.model_id = label_model
+
+        # Enrich from vllm:cache_config_info labels (absent → stays None).
+        blocks = _extract_label(raw, "num_gpu_blocks")
+        if blocks and blocks.isdigit():
+            info.num_gpu_blocks = int(blocks)
+        block_size = _extract_label(raw, "block_size")
+        if block_size and block_size.isdigit():
+            info.block_size = int(block_size)
+        util = _extract_label(raw, "gpu_memory_utilization")
+        if util:
+            try:
+                info.gpu_memory_utilization = float(util)
+            except ValueError:
+                pass
+        dtype = _extract_label(raw, "cache_dtype")
+        if dtype and dtype != "None":
+            info.cache_dtype = dtype
 
     def _compute_rates(self, current: VllmMetrics) -> None:
         if self._prev_metrics is None or not self._prev_metrics.server_reachable:

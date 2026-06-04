@@ -90,6 +90,30 @@ def test_rate_computation():
     assert current.prompt_tokens_per_sec == pytest.approx(50.0)
 
 
+def test_cache_config_enrichment():
+    # block_size must not be confused with hash_block_size / mamba_block_size.
+    text = (
+        'vllm:cache_config_info{_block_size_resolved="True",block_size="256",'
+        'cache_dtype="fp8",gpu_memory_utilization="0.92",hash_block_size="None",'
+        'num_gpu_blocks="94671",mamba_block_size="None"} 1.0\n'
+    )
+    poller = MetricsPoller(base_url="http://localhost:8000")
+    m = VllmMetrics()
+    poller._parse_into(m, text)
+    assert m.model_info.block_size == 256
+    assert m.model_info.num_gpu_blocks == 94671
+    assert m.model_info.gpu_memory_utilization == pytest.approx(0.92)
+    assert m.model_info.cache_dtype == "fp8"
+
+
+def test_cache_config_absent_leaves_none():
+    poller = MetricsPoller(base_url="http://localhost:8000")
+    m = VllmMetrics()
+    poller._parse_into(m, 'vllm:num_requests_running{model_name="m"} 1.0')
+    assert m.model_info.num_gpu_blocks is None
+    assert m.model_info.cache_dtype is None
+
+
 def test_preemptions_and_finish_reasons():
     text = (
         'vllm:num_preemptions_total{engine="0",model_name="m"} 5.0\n'
