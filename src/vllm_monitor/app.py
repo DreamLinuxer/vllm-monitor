@@ -362,7 +362,8 @@ class VllmMonitorApp(App):
 
         if m.spec_decode_active:
             self.query_one("#card-spec", MetricCard).update_value(
-                f"[bold cyan]{m.spec_acceptance_rate:.1f}%[/bold cyan]"
+                f"[bold cyan]{m.spec_acceptance_rate:.1f}%[/bold cyan]\n"
+                f"[dim]{m.spec_accept_length:.2f} tok/step[/dim]"
             )
         else:
             self.query_one("#card-spec", MetricCard).update_value("[dim]—[/dim]")

@@ -75,7 +75,9 @@ class VllmMetrics:
     spec_decode_active: bool = False
     spec_draft_tokens_total: float = 0.0
     spec_accepted_tokens_total: float = 0.0
-    spec_acceptance_rate: float = 0.0  # percent
+    spec_drafts_total: float = 0.0
+    spec_acceptance_rate: float = 0.0  # percent (accepted / drafted tokens)
+    spec_accept_length: float = 0.0  # accepted tokens per draft step
 
     # GPU memory (filled from /metrics if available; absent on vLLM v1)
     gpu_memory_used_bytes: float = 0.0
@@ -228,6 +230,7 @@ class MetricsPoller:
         prefix_hits = 0.0
         spec_draft = 0.0
         spec_accepted = 0.0
+        spec_drafts = 0.0
         spec_present = False
         preemptions = 0.0
         finished: dict[str, float] = {}
@@ -253,6 +256,8 @@ class MetricsPoller:
                 spec_present = True
             elif name == "vllm:spec_decode_num_accepted_tokens_total":
                 spec_accepted += v
+            elif name == "vllm:spec_decode_num_drafts_total":
+                spec_drafts += v
         m.prompt_tokens_total = prompt_total
         m.generation_tokens_total = gen_total
         m.request_success_total = success_total
@@ -261,12 +266,16 @@ class MetricsPoller:
         m.prefix_cache_queries_total = prefix_queries
         m.prefix_cache_hits_total = prefix_hits
 
-        # Speculative decoding: acceptance = accepted / drafted draft tokens.
+        # Speculative decoding. acceptance = accepted / drafted tokens (%);
+        # accept length = accepted tokens per draft step (the MTP speedup).
         m.spec_decode_active = spec_present
         m.spec_draft_tokens_total = spec_draft
         m.spec_accepted_tokens_total = spec_accepted
+        m.spec_drafts_total = spec_drafts
         if spec_present and spec_draft > 0:
             m.spec_acceptance_rate = spec_accepted / spec_draft * 100
+        if spec_present and spec_drafts > 0:
+            m.spec_accept_length = spec_accepted / spec_drafts
 
         # KV cache usage: vLLM v1 renamed gpu_cache_usage_perc → kv_cache_usage_perc.
         m.gpu_cache_usage_perc = (

@@ -153,6 +153,7 @@ def test_preemptions_and_finish_reasons():
 
 def test_spec_decode_acceptance():
     text = (
+        'vllm:spec_decode_num_drafts_total{engine="0",model_name="m"} 500.0\n'
         'vllm:spec_decode_num_draft_tokens_total{engine="0",model_name="m"} 1000.0\n'
         'vllm:spec_decode_num_accepted_tokens_total{engine="0",model_name="m"} 700.0\n'
     )
@@ -160,7 +161,8 @@ def test_spec_decode_acceptance():
     m = VllmMetrics()
     poller._parse_into(m, text)
     assert m.spec_decode_active is True
-    assert m.spec_acceptance_rate == pytest.approx(70.0)
+    assert m.spec_acceptance_rate == pytest.approx(70.0)  # 700 / 1000 tokens
+    assert m.spec_accept_length == pytest.approx(1.4)  # 700 / 500 drafts
 
 
 def test_spec_decode_absent_is_inactive():
