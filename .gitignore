@@ -1,0 +1,31 @@
+# Python bytecode / caches
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Packaging / build artifacts
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Virtual environments / lockfiles
+.venv/
+venv/
+uv.lock
+
+# Secrets / credentials
+.env
+.env.*
+*.key
+*.priv
+
+# Editor / OS cruft
+*.swp
+.DS_Store
+
+# Claude Code local dirs
+.claude-home/
+claude/
