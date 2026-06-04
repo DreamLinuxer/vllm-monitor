@@ -14,6 +14,7 @@ import pytest
 
 from vllm_monitor.app import (
     CHART_HEIGHT,
+    MetricCard,
     ModelInfoPanel,
     SparklineCard,
     VllmMonitorApp,
@@ -168,6 +169,20 @@ async def test_spec_decode_card_shows_dash_when_inactive():
         assert not app.metrics.spec_decode_active
         text = str(app.query_one("#card-spec-value").render())
         assert "—" in text and "%" not in text
+    await app._poller.close()
+
+
+async def test_two_line_card_value_not_clipped():
+    """A two-line metric value must get enough height (regression: padding-top
+    left only one usable row, clipping the second line)."""
+    app = _make_app()
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        app.query_one("#card-finished", MetricCard).update_value("first\nsecond")
+        await pilot.pause()
+        lbl = app.query_one("#card-finished-value")
+        needed = lbl.get_content_height(lbl.size, lbl.size, lbl.size.width)
+        assert lbl.size.height >= needed >= 2
     await app._poller.close()
 
 

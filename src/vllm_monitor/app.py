@@ -89,10 +89,10 @@ class MetricCard(Static):
         text-style: bold;
     }
     MetricCard .card-value {
-        text-align: center;
         text-style: bold;
         height: 2;
-        padding-top: 1;
+        content-align: center middle;
+        width: 1fr;
     }
     """
 
