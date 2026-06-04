@@ -4,19 +4,17 @@ Real-time terminal UI dashboard for monitoring [vLLM](https://github.com/vllm-pr
 
 ![vllm-monitor dashboard](docs/screenshot.svg)
 
-<sub>Regenerate with `python scripts/screenshot.py`.</sub>
-
 ## Features
 
 - **Request load**: running, queued, and preemption counts (preemptions flag KV-cache pressure)
 - **Latency**: end-to-end, time-to-first-token (TTFT), time-per-output-token (TPOT), and queue time — recent means with units auto-scaled to magnitude (ms / s / m / h)
 - **Throughput**: prompt and generation tokens/sec
-- **Cache**: GPU KV-cache utilization and prefix (radix) cache hit rate, with alert colors (yellow ≥ 80%, red ≥ 95% on KV cache)
+- **Cache**: GPU KV-cache utilization and prefix cache hit rate, with alert colors (yellow ≥ 80%, red ≥ 95% on KV cache)
 - **Speculative decoding (MTP)**: acceptance rate and accept length (accepted tokens per draft step); shows `—` when spec decode is off
 - **Completed requests**: totals (requests + tokens) with a finish-reason breakdown (truncated-by-length, errors)
 - **Average request shape**: mean prompt (input) vs generation (output) tokens per request
 - **History charts**: rolling 60-sample multi-row bar charts with a y-axis scale for active requests, generation throughput, and KV-cache usage
-- **Model panel**: model name (from `/v1/models`, or the `model_name` metric label when that endpoint needs auth) plus cache config — KV dtype, GPU blocks, memory-utilization target
+- **Model panel**: model name (read from the `model_name` metric label every poll, so it follows model changes after a restart) plus cache config — KV dtype, GPU blocks, memory-utilization target
 - **Clean TUI**: tiles grouped into labeled sections, framed header, a centered/outlined command palette (`Ctrl+P`), and the `ansi-dark` theme by default
 - **Graceful degradation**: any metric the server doesn't expose simply shows `—`
 - **Configurable poll interval** (default 2s)
@@ -90,9 +88,9 @@ vllm-monitor --interval 1
 
 # With API key
 vllm-monitor --url http://my-server:8000 --api-key mytoken
-# or via env var:
-VLLM_API_KEY=mytoken vllm-monitor
 ```
+
+Every option can also be set via environment variable: `VLLM_URL`, `VLLM_API_KEY`, `VLLM_MONITOR_INTERVAL`.
 
 ### Key Bindings
 
@@ -116,18 +114,18 @@ VLLM_API_KEY=mytoken vllm-monitor
 | Prompt Tokens/s | `vllm:prompt_tokens_total` (rate) | Prompt token processing throughput |
 | Gen Tokens/s | `vllm:generation_tokens_total` (rate) | Token generation throughput |
 | GPU KV Cache | `vllm:kv_cache_usage_perc` (falls back to `vllm:gpu_cache_usage_perc`) | KV cache block utilization |
-| Prefix Cache Hit | `vllm:prefix_cache_hits_total` / `vllm:prefix_cache_queries_total` | Prefix (radix) cache hit rate |
+| Prefix Cache Hit | `vllm:prefix_cache_hits_total` / `vllm:prefix_cache_queries_total` | Prefix cache hit rate |
 | Spec Accept (MTP) | `vllm:spec_decode_num_{accepted_tokens,draft_tokens,drafts}_total` | Acceptance rate and accepted tokens per draft step |
 | Completed | `vllm:request_success_total` (by `finished_reason`) | Completed requests + tokens, with truncated/errored split |
 | Avg Req Tokens | `vllm:request_prompt_tokens` / `vllm:request_generation_tokens` | Mean prompt / generation tokens per request |
-| Model / config | `/v1/models`, `vllm:cache_config_info` | Model name, KV dtype, GPU blocks, mem-util target |
+| Model / config | `model_name` label, `vllm:cache_config_info` | Model name, KV dtype, GPU blocks, mem-util target |
 
 Latency values are *recent* means (the change in the histogram's sum/count between polls), falling back to the cumulative mean. Any metric the server doesn't expose is shown as `—`.
 
 ## Requirements
 
 - Python 3.10+
-- A vLLM server exposing `/metrics` (Prometheus — enabled by default). Works with the vLLM **v1** engine metric names. `/v1/models` is optional: the model name falls back to the `model_name` metric label when that endpoint is unavailable or requires auth.
+- A vLLM server exposing `/metrics` (Prometheus — enabled by default). Works with the vLLM **v1** engine metric names. Everything (including the model name, via the `model_name` label) comes from `/metrics` — no `/v1/models` request is made.
 
 ## Development
 
@@ -136,9 +134,11 @@ pip install -e ".[dev]"
 pytest
 ```
 
+Regenerate the README screenshot with `python scripts/screenshot.py`.
+
 ## Acknowledgments
 
-Originally created by [Dennis Reichenberg](https://github.com/dennisreichenberg). Maintained as a fork by [Tomas Kirnak](https://github.com/tomaskir).
+Originally created by [Dennis Reichenberg](https://github.com/dennisreichenberg) and now maintained by [Tomas Kirnak](https://github.com/tomaskir).
 
 ## License
 
