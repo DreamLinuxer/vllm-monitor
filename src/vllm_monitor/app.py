@@ -2,11 +2,9 @@
 
 from __future__ import annotations
 
-import asyncio
 import math
 from collections import deque
 from collections.abc import Callable
-from typing import Optional
 
 from rich.markup import escape
 from textual.app import App, ComposeResult
@@ -232,7 +230,7 @@ class VllmMonitorApp(App):
         Binding("r", "refresh", "Refresh now"),
     ]
 
-    metrics: reactive[Optional[VllmMetrics]] = reactive(None)
+    metrics: reactive[VllmMetrics | None] = reactive(None)
 
     def __init__(self, poller: MetricsPoller, interval: float = 2.0, **kwargs) -> None:
         super().__init__(**kwargs)

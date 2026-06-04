@@ -7,7 +7,6 @@ import re
 import time
 from collections import deque
 from dataclasses import dataclass, field
-from typing import Optional
 
 import httpx
 
@@ -28,13 +27,13 @@ LATENCY_HISTOGRAMS = {
 @dataclass
 class ModelInfo:
     model_id: str = "unknown"
-    max_model_len: Optional[int] = None
-    tensor_parallel_size: Optional[int] = None
+    max_model_len: int | None = None
+    tensor_parallel_size: int | None = None
     # From vllm:cache_config_info labels (when present)
-    num_gpu_blocks: Optional[int] = None
-    block_size: Optional[int] = None
-    gpu_memory_utilization: Optional[float] = None
-    cache_dtype: Optional[str] = None
+    num_gpu_blocks: int | None = None
+    block_size: int | None = None
+    gpu_memory_utilization: float | None = None
+    cache_dtype: str | None = None
 
 
 @dataclass
@@ -142,7 +141,7 @@ def _hist_sum_count(raw: dict[str, float], name: str) -> tuple[float, float]:
     return total_sum, total_count
 
 
-def _extract_label(raw: dict[str, float], label: str) -> Optional[str]:
+def _extract_label(raw: dict[str, float], label: str) -> str | None:
     """Return the first value of `label` found across all metric keys.
 
     Anchored on a label boundary ({ or ,) so e.g. ``block_size`` does not
@@ -157,14 +156,14 @@ def _extract_label(raw: dict[str, float], label: str) -> Optional[str]:
 
 
 class MetricsPoller:
-    def __init__(self, base_url: str, api_key: Optional[str] = None, interval: float = 2.0) -> None:
+    def __init__(self, base_url: str, api_key: str | None = None, interval: float = 2.0) -> None:
         self.base_url = base_url.rstrip("/")
         self.interval = interval
         headers = {}
         if api_key:
             headers["Authorization"] = f"Bearer {api_key}"
         self._client = httpx.AsyncClient(headers=headers, timeout=5.0)
-        self._prev_metrics: Optional[VllmMetrics] = None
+        self._prev_metrics: VllmMetrics | None = None
         self._prev_time: float = 0.0
         self.history = MetricsHistory()
 

@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Optional
-
 import typer
 
 app = typer.Typer(
@@ -17,7 +15,7 @@ app = typer.Typer(
 def monitor(
     url: str = typer.Option("http://localhost:8000", "--url", "-u", help="Base URL of the vLLM server."),
     interval: float = typer.Option(2.0, "--interval", "-i", help="Polling interval in seconds.", min=0.5),
-    api_key: Optional[str] = typer.Option(None, "--api-key", envvar="VLLM_API_KEY", help="API key for the vLLM server."),
+    api_key: str | None = typer.Option(None, "--api-key", envvar="VLLM_API_KEY", help="API key for the vLLM server."),
 ) -> None:
     """Launch the vLLM health monitor TUI dashboard.
 
