@@ -100,3 +100,23 @@ def test_sparkline_all_same():
     assert len(spark) == 10
     # all same value → all map to max bar (since max_val == value)
     assert all(c == "█" for c in spark)
+
+
+def test_parse_drops_non_finite():
+    # vLLM can emit NaN/Inf for idle gauges; these must not enter the dict.
+    text = (
+        'vllm:kv_cache_usage_perc{model_name="m"} NaN\n'
+        'vllm:num_requests_running{model_name="m"} +Inf\n'
+        'vllm:num_requests_waiting{model_name="m"} 4.0\n'
+    )
+    raw = _parse_prometheus(text)
+    assert not any("kv_cache_usage_perc" in k for k in raw)
+    assert not any("num_requests_running" in k for k in raw)
+    assert raw['vllm:num_requests_waiting{model_name="m"}'] == pytest.approx(4.0)
+
+
+def test_sparkline_handles_non_finite():
+    # A NaN/Inf sample must not raise (int(NaN) would); it renders as 0.
+    spark = sparkline(deque([0.0, float("nan"), float("inf"), 2.0]), width=4)
+    assert len(spark) == 4
+    assert spark[1] == " " and spark[2] == " "  # NaN/Inf → 0 → empty bar

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import re
 import time
 from collections import deque
@@ -79,9 +80,14 @@ def _parse_prometheus(text: str) -> dict[str, float]:
         if m:
             name = m.group(1)
             try:
-                result[name] = float(m.group(2))
+                value = float(m.group(2))
             except ValueError:
-                pass
+                continue
+            # vLLM emits NaN/Inf for some gauges (e.g. an idle hit rate).
+            # Drop them so they read as "no data" (0.0) instead of crashing
+            # downstream math (e.g. int(NaN) in sparkline()).
+            if math.isfinite(value):
+                result[name] = value
     return result
 
 
@@ -257,12 +263,13 @@ class MetricsPoller:
 def sparkline(values: deque[float], width: int = 20) -> str:
     """Render a unicode block sparkline from a deque of floats."""
     bars = " ▁▂▃▄▅▆▇█"
-    samples = list(values)[-width:]
+    # Treat non-finite samples (NaN/Inf) as 0 so int() below can't raise.
+    samples = [v if math.isfinite(v) else 0.0 for v in list(values)[-width:]]
     if not samples:
         return " " * width
     max_val = max(samples) or 1.0
     result = []
     for v in samples:
         idx = min(int(v / max_val * (len(bars) - 1)), len(bars) - 1)
-        result.append(bars[idx])
+        result.append(bars[max(0, idx)])
     return "".join(result)
