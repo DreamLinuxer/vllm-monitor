@@ -40,7 +40,6 @@ class MetricCard(Static):
         border: round $accent;
         padding: 0 1;
         height: 5;
-        min-width: 12;
     }
     MetricCard .card-title {
         color: $text-muted;

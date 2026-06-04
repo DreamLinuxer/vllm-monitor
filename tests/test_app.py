@@ -53,8 +53,9 @@ async def test_rows_lay_out_side_by_side():
     sibling after the first.
     """
     expected = {"#model-row": 4, "#metrics-row": 5, "#sparklines-row": 3}
-    # Include 80 cols: the 5-card metrics row used to overflow at that width.
-    for width in (80, 120):
+    # Narrow widths (44/80) used to overflow: any fixed min-width on the cards
+    # makes the 1fr layout balloon once n*min-width exceeds the terminal width.
+    for width in (44, 80, 120):
         app = _make_app()
         async with app.run_test(size=(width, 40)) as pilot:
             await pilot.pause()
