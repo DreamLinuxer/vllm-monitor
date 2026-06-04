@@ -14,6 +14,16 @@ import httpx
 # Maximum history samples kept for sparkline
 HISTORY_SIZE = 60
 
+# Latency histograms we surface, keyed by a short name. Each exposes a vLLM
+# `<name>_sum` / `<name>_count` pair from which we derive a mean. Any that the
+# server doesn't expose simply stay absent (the UI shows "—").
+LATENCY_HISTOGRAMS = {
+    "e2e": "vllm:e2e_request_latency_seconds",
+    "ttft": "vllm:time_to_first_token_seconds",
+    "tpot": "vllm:request_time_per_output_token_seconds",
+    "queue": "vllm:request_queue_time_seconds",
+}
+
 
 @dataclass
 class ModelInfo:
@@ -52,10 +62,11 @@ class VllmMetrics:
     gpu_memory_used_bytes: float = 0.0
     gpu_memory_total_bytes: float = 0.0
 
-    # Latency (histogram sum/count — used to derive cumulative & recent mean)
-    e2e_latency_sum_s: float = 0.0
-    e2e_latency_count: float = 0.0
-    e2e_latency_mean_s: float = 0.0
+    # Latency histograms, keyed by short name (see LATENCY_HISTOGRAMS). Means
+    # are recent (delta between polls) when possible, else cumulative.
+    latency_sum: dict[str, float] = field(default_factory=dict)
+    latency_count: dict[str, float] = field(default_factory=dict)
+    latency_mean_s: dict[str, float] = field(default_factory=dict)
 
     # Model info
     model_info: ModelInfo = field(default_factory=ModelInfo)
@@ -100,6 +111,18 @@ def _get_gauge(raw: dict[str, float], *keys: str) -> float:
             if rk.startswith(k + "{") or rk == k:
                 return raw[rk]
     return 0.0
+
+
+def _hist_sum_count(raw: dict[str, float], name: str) -> tuple[float, float]:
+    """Sum a histogram's _sum and _count series across all label sets."""
+    total_sum = 0.0
+    total_count = 0.0
+    for k, v in raw.items():
+        if f"{name}_sum" in k:
+            total_sum += v
+        elif f"{name}_count" in k:
+            total_count += v
+    return total_sum, total_count
 
 
 def _extract_label(raw: dict[str, float], label: str) -> Optional[str]:
@@ -211,18 +234,14 @@ class MetricsPoller:
         elif prefix_queries > 0:
             m.gpu_prefix_cache_hit_rate = prefix_hits / prefix_queries * 100
 
-        # e2e latency histogram — keep raw sum/count; mean derived in _compute_rates.
-        latency_sum = 0.0
-        latency_count = 0.0
-        for k, v in raw.items():
-            if "e2e_request_latency_seconds_sum" in k:
-                latency_sum += v
-            if "e2e_request_latency_seconds_count" in k:
-                latency_count += v
-        m.e2e_latency_sum_s = latency_sum
-        m.e2e_latency_count = latency_count
-        if latency_count > 0:
-            m.e2e_latency_mean_s = latency_sum / latency_count
+        # Latency histograms — keep raw sum/count; recent means derived in
+        # _compute_rates. Absent histograms simply never get a key.
+        for key, name in LATENCY_HISTOGRAMS.items():
+            hsum, hcount = _hist_sum_count(raw, name)
+            if hcount > 0:
+                m.latency_sum[key] = hsum
+                m.latency_count[key] = hcount
+                m.latency_mean_s[key] = hsum / hcount
 
         # GPU memory (absent on vLLM v1 — leaves the card showing "—").
         for k, v in raw.items():
@@ -247,12 +266,13 @@ class MetricsPoller:
         current.prompt_tokens_per_sec = max(0.0, (current.prompt_tokens_total - self._prev_metrics.prompt_tokens_total) / dt)
         current.generation_tokens_per_sec = max(0.0, (current.generation_tokens_total - self._prev_metrics.generation_tokens_total) / dt)
 
-        # Recent mean latency: change in histogram sum / change in count since the
-        # last poll. Falls back to the cumulative mean already set in _parse_into.
-        d_count = current.e2e_latency_count - self._prev_metrics.e2e_latency_count
-        d_sum = current.e2e_latency_sum_s - self._prev_metrics.e2e_latency_sum_s
-        if d_count > 0 and d_sum >= 0:
-            current.e2e_latency_mean_s = d_sum / d_count
+        # Recent mean latency per histogram: change in sum / change in count
+        # since the last poll. Falls back to the cumulative mean from _parse_into.
+        for key in LATENCY_HISTOGRAMS:
+            d_count = current.latency_count.get(key, 0.0) - self._prev_metrics.latency_count.get(key, 0.0)
+            d_sum = current.latency_sum.get(key, 0.0) - self._prev_metrics.latency_sum.get(key, 0.0)
+            if d_count > 0 and d_sum >= 0:
+                current.latency_mean_s[key] = d_sum / d_count
 
     def _update_history(self, m: VllmMetrics) -> None:
         self.history.requests_running.append(m.num_requests_running)

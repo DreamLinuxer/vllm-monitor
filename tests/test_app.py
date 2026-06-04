@@ -39,6 +39,9 @@ async def test_app_composes_and_ticks():
             "#card-gpu-cache",
             "#card-prefix-hit",
             "#card-gpu-mem",
+            "#card-ttft",
+            "#card-tpot",
+            "#card-queue",
             "#spark-running",
             "#spark-gentps",
             "#spark-cache",
@@ -54,7 +57,12 @@ async def test_rows_lay_out_side_by_side():
     Regression for cards defaulting to full container width, which hid every
     sibling after the first.
     """
-    expected = {"#model-row": 4, "#metrics-row": 5, "#sparklines-row": 3}
+    expected = {
+        "#model-row": 3,
+        "#latency-row": 4,
+        "#metrics-row": 5,
+        "#sparklines-row": 3,
+    }
     # Narrow widths (44/80) used to overflow: any fixed min-width on the cards
     # makes the 1fr layout balloon once n*min-width exceeds the terminal width.
     for width in (44, 80, 120):

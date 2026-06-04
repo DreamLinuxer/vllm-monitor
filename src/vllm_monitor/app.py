@@ -11,7 +11,7 @@ from typing import Optional
 from rich.markup import escape
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.containers import Horizontal, Vertical
+from textual.containers import Horizontal, VerticalScroll
 from textual.reactive import reactive
 from textual.widgets import Footer, Header, Label, Static
 
@@ -37,6 +37,15 @@ def _color_pct(value: float, warn: float, crit: float) -> str:
 
 def _status_color(reachable: bool) -> str:
     return "[bold green]● ONLINE[/bold green]" if reachable else "[bold red]● OFFLINE[/bold red]"
+
+
+def _fmt_latency(seconds: float) -> str:
+    """Format a latency: '—' when unknown, ms under a second, else seconds."""
+    if seconds <= 0:
+        return "[dim]—[/dim]"
+    if seconds < 1:
+        return f"[bold white]{seconds * 1000:.0f}ms[/bold white]"
+    return f"[bold white]{seconds:.1f}s[/bold white]"
 
 
 class MetricCard(Static):
@@ -181,16 +190,15 @@ class VllmMonitorApp(App):
         background: $panel;
         color: $text-muted;
     }
-    #metrics-row {
+    #body {
+        height: 1fr;
+    }
+    #model-row, #latency-row, #metrics-row {
         height: 5;
         margin: 0;
     }
     #sparklines-row {
         height: 9;
-        margin: 0;
-    }
-    #model-row {
-        height: 5;
         margin: 0;
     }
     MetricCard, SparklineCard, ModelInfoPanel {
@@ -214,21 +222,26 @@ class VllmMonitorApp(App):
     def compose(self) -> ComposeResult:
         yield Header()
         yield Label("", id="status-bar")
-        with Horizontal(id="model-row"):
-            yield ModelInfoPanel(id="model-panel")
-            yield MetricCard("card-running", "Running Requests")
-            yield MetricCard("card-waiting", "Queued Requests")
-            yield MetricCard("card-latency", "Avg E2E Latency")
-        with Horizontal(id="metrics-row"):
-            yield MetricCard("card-prompt-tps", "Prompt Tokens/s")
-            yield MetricCard("card-gen-tps", "Gen Tokens/s")
-            yield MetricCard("card-gpu-cache", "GPU KV Cache")
-            yield MetricCard("card-prefix-hit", "Prefix Cache Hit")
-            yield MetricCard("card-gpu-mem", "GPU Memory")
-        with Horizontal(id="sparklines-row"):
-            yield SparklineCard("spark-running", "Active Requests (history)")
-            yield SparklineCard("spark-gentps", "Gen Tokens/s (history)")
-            yield SparklineCard("spark-cache", "GPU Cache % (history)")
+        with VerticalScroll(id="body"):
+            with Horizontal(id="model-row"):
+                yield ModelInfoPanel(id="model-panel")
+                yield MetricCard("card-running", "Running Requests")
+                yield MetricCard("card-waiting", "Queued Requests")
+            with Horizontal(id="latency-row"):
+                yield MetricCard("card-latency", "Avg E2E Latency")
+                yield MetricCard("card-ttft", "Time to First Token")
+                yield MetricCard("card-tpot", "Time / Output Token")
+                yield MetricCard("card-queue", "Queue Time")
+            with Horizontal(id="metrics-row"):
+                yield MetricCard("card-prompt-tps", "Prompt Tokens/s")
+                yield MetricCard("card-gen-tps", "Gen Tokens/s")
+                yield MetricCard("card-gpu-cache", "GPU KV Cache")
+                yield MetricCard("card-prefix-hit", "Prefix Cache Hit")
+                yield MetricCard("card-gpu-mem", "GPU Memory")
+            with Horizontal(id="sparklines-row"):
+                yield SparklineCard("spark-running", "Active Requests (history)")
+                yield SparklineCard("spark-gentps", "Gen Tokens/s (history)")
+                yield SparklineCard("spark-cache", "GPU Cache % (history)")
         yield Footer()
 
     def on_mount(self) -> None:
@@ -259,11 +272,14 @@ class VllmMonitorApp(App):
         self.query_one("#card-running", MetricCard).update_value(f"[bold cyan]{m.num_requests_running:.0f}[/bold cyan]")
         self.query_one("#card-waiting", MetricCard).update_value(f"[bold yellow]{m.num_requests_waiting:.0f}[/bold yellow]")
 
-        if m.e2e_latency_mean_s > 0:
-            latency_ms = m.e2e_latency_mean_s * 1000
-            self.query_one("#card-latency", MetricCard).update_value(f"[bold white]{latency_ms:.0f}ms[/bold white]")
-        else:
-            self.query_one("#card-latency", MetricCard).update_value("[dim]—[/dim]")
+        for card_id, key in (
+            ("#card-latency", "e2e"),
+            ("#card-ttft", "ttft"),
+            ("#card-tpot", "tpot"),
+            ("#card-queue", "queue"),
+        ):
+            mean = m.latency_mean_s.get(key, 0.0)
+            self.query_one(card_id, MetricCard).update_value(_fmt_latency(mean))
 
         self.query_one("#card-prompt-tps", MetricCard).update_value(f"[bold white]{m.prompt_tokens_per_sec:.1f}[/bold white]")
         self.query_one("#card-gen-tps", MetricCard).update_value(f"[bold white]{m.generation_tokens_per_sec:.1f}[/bold white]")

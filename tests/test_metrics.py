@@ -39,6 +39,12 @@ vllm:generation_tokens_total{engine="0",model_name="deepseek-v4-flash"} 45000.0
 # TYPE vllm:e2e_request_latency_seconds histogram
 vllm:e2e_request_latency_seconds_sum{engine="0",model_name="deepseek-v4-flash"} 320.5
 vllm:e2e_request_latency_seconds_count{engine="0",model_name="deepseek-v4-flash"} 200.0
+# TYPE vllm:time_to_first_token_seconds histogram
+vllm:time_to_first_token_seconds_sum{engine="0",model_name="deepseek-v4-flash"} 50.0
+vllm:time_to_first_token_seconds_count{engine="0",model_name="deepseek-v4-flash"} 200.0
+# TYPE vllm:request_queue_time_seconds histogram
+vllm:request_queue_time_seconds_sum{engine="0",model_name="deepseek-v4-flash"} 20.0
+vllm:request_queue_time_seconds_count{engine="0",model_name="deepseek-v4-flash"} 200.0
 """
 
 
@@ -61,7 +67,11 @@ def test_parse_into_metrics():
     # _by_source_total must not be double-counted into the prompt total.
     assert m.prompt_tokens_total == pytest.approx(12000.0)
     assert m.generation_tokens_total == pytest.approx(45000.0)
-    assert m.e2e_latency_mean_s == pytest.approx(320.5 / 200.0)
+    assert m.latency_mean_s["e2e"] == pytest.approx(320.5 / 200.0)
+    # Other latency histograms parsed; an absent one (tpot) stays unset.
+    assert m.latency_mean_s["ttft"] == pytest.approx(50.0 / 200.0)
+    assert m.latency_mean_s["queue"] == pytest.approx(20.0 / 200.0)
+    assert "tpot" not in m.latency_mean_s
     # Model name recovered from metric labels (no /v1/models call).
     assert m.model_info.model_id == "deepseek-v4-flash"
 
