@@ -43,12 +43,17 @@ class VllmMetrics:
     gpu_cache_usage_perc: float = 0.0
     cpu_cache_usage_perc: float = 0.0
     gpu_prefix_cache_hit_rate: float = 0.0
+    # Prefix cache counters (vLLM v1 — hit rate is derived from these)
+    prefix_cache_queries_total: float = 0.0
+    prefix_cache_hits_total: float = 0.0
 
-    # GPU memory (filled from /metrics if available)
+    # GPU memory (filled from /metrics if available; absent on vLLM v1)
     gpu_memory_used_bytes: float = 0.0
     gpu_memory_total_bytes: float = 0.0
 
-    # Latency
+    # Latency (histogram sum/count — used to derive cumulative & recent mean)
+    e2e_latency_sum_s: float = 0.0
+    e2e_latency_count: float = 0.0
     e2e_latency_mean_s: float = 0.0
 
     # Model info
@@ -84,11 +89,21 @@ def _get_gauge(raw: dict[str, float], *keys: str) -> float:
     for k in keys:
         if k in raw:
             return raw[k]
-        # Also try without labels
+        # Also try with labels
         for rk in raw:
             if rk.startswith(k + "{") or rk == k:
                 return raw[rk]
     return 0.0
+
+
+def _extract_label(raw: dict[str, float], label: str) -> Optional[str]:
+    """Return the first value of `label` found across all metric keys."""
+    pat = re.compile(rf'{re.escape(label)}="([^"]*)"')
+    for key in raw:
+        m = pat.search(key)
+        if m and m.group(1):
+            return m.group(1)
+    return None
 
 
 class MetricsPoller:
@@ -152,26 +167,45 @@ class MetricsPoller:
         m.num_requests_waiting = _get_gauge(raw, "vllm:num_requests_waiting")
         m.num_requests_swapped = _get_gauge(raw, "vllm:num_requests_swapped")
 
-        # Sum across all model labels for token totals
+        # Sum across all model labels for token / counter totals.
+        # Exclude derived breakdowns (e.g. *_by_source_total) that would double-count.
         prompt_total = 0.0
         gen_total = 0.0
         success_total = 0.0
+        prefix_queries = 0.0
+        prefix_hits = 0.0
         for k, v in raw.items():
-            if "prompt_tokens_total" in k:
+            name = k.split("{", 1)[0]
+            if name == "vllm:prompt_tokens_total":
                 prompt_total += v
-            if "generation_tokens_total" in k:
+            elif name == "vllm:generation_tokens_total":
                 gen_total += v
-            if "request_success_total" in k:
+            elif name == "vllm:request_success_total":
                 success_total += v
+            elif name == "vllm:prefix_cache_queries_total":
+                prefix_queries += v
+            elif name == "vllm:prefix_cache_hits_total":
+                prefix_hits += v
         m.prompt_tokens_total = prompt_total
         m.generation_tokens_total = gen_total
         m.request_success_total = success_total
+        m.prefix_cache_queries_total = prefix_queries
+        m.prefix_cache_hits_total = prefix_hits
 
-        m.gpu_cache_usage_perc = _get_gauge(raw, "vllm:gpu_cache_usage_perc") * 100
+        # KV cache usage: vLLM v1 renamed gpu_cache_usage_perc → kv_cache_usage_perc.
+        m.gpu_cache_usage_perc = (
+            _get_gauge(raw, "vllm:kv_cache_usage_perc", "vllm:gpu_cache_usage_perc") * 100
+        )
         m.cpu_cache_usage_perc = _get_gauge(raw, "vllm:cpu_cache_usage_perc") * 100
-        m.gpu_prefix_cache_hit_rate = _get_gauge(raw, "vllm:gpu_prefix_cache_hit_rate") * 100
 
-        # e2e latency bucket/sum — use _sum/_count if available
+        # Prefix hit rate: prefer the legacy gauge; otherwise derive from counters.
+        legacy_prefix = _get_gauge(raw, "vllm:gpu_prefix_cache_hit_rate")
+        if legacy_prefix > 0:
+            m.gpu_prefix_cache_hit_rate = legacy_prefix * 100
+        elif prefix_queries > 0:
+            m.gpu_prefix_cache_hit_rate = prefix_hits / prefix_queries * 100
+
+        # e2e latency histogram — keep raw sum/count; mean derived in _compute_rates.
         latency_sum = 0.0
         latency_count = 0.0
         for k, v in raw.items():
@@ -179,15 +213,24 @@ class MetricsPoller:
                 latency_sum += v
             if "e2e_request_latency_seconds_count" in k:
                 latency_count += v
+        m.e2e_latency_sum_s = latency_sum
+        m.e2e_latency_count = latency_count
         if latency_count > 0:
             m.e2e_latency_mean_s = latency_sum / latency_count
 
-        # GPU memory
+        # GPU memory (absent on vLLM v1 — leaves the card showing "—").
         for k, v in raw.items():
             if "gpu_memory_used_bytes" in k:
                 m.gpu_memory_used_bytes = v
             if "gpu_memory_total_bytes" in k:
                 m.gpu_memory_total_bytes = v
+
+        # Model name fallback: when /v1/models is unauthorized, every metric
+        # carries a model_name="..." label we can read instead.
+        if m.model_info.model_id in ("", "unknown"):
+            label_model = _extract_label(raw, "model_name")
+            if label_model:
+                m.model_info.model_id = label_model
 
     def _compute_rates(self, current: VllmMetrics) -> None:
         if self._prev_metrics is None or not self._prev_metrics.server_reachable:
@@ -197,6 +240,13 @@ class MetricsPoller:
             return
         current.prompt_tokens_per_sec = max(0.0, (current.prompt_tokens_total - self._prev_metrics.prompt_tokens_total) / dt)
         current.generation_tokens_per_sec = max(0.0, (current.generation_tokens_total - self._prev_metrics.generation_tokens_total) / dt)
+
+        # Recent mean latency: change in histogram sum / change in count since the
+        # last poll. Falls back to the cumulative mean already set in _parse_into.
+        d_count = current.e2e_latency_count - self._prev_metrics.e2e_latency_count
+        d_sum = current.e2e_latency_sum_s - self._prev_metrics.e2e_latency_sum_s
+        if d_count > 0 and d_sum >= 0:
+            current.e2e_latency_mean_s = d_sum / d_count
 
     def _update_history(self, m: VllmMetrics) -> None:
         self.history.requests_running.append(m.num_requests_running)

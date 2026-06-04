@@ -8,36 +8,44 @@ import pytest
 
 from vllm_monitor.metrics import MetricsPoller, VllmMetrics, _parse_prometheus, sparkline
 
+# Mirrors the schema emitted by the vLLM v1 engine (engine/model labels,
+# kv_cache_usage_perc, prefix cache counters, no /v1/models needed for the name).
 SAMPLE_PROMETHEUS = """
-# HELP vllm:num_requests_running Number of requests currently running on GPU.
+# HELP vllm:num_requests_running Number of requests in model execution batches.
 # TYPE vllm:num_requests_running gauge
-vllm:num_requests_running{model_name="llama3"} 3.0
+vllm:num_requests_running{engine="0",model_name="deepseek-v4-flash"} 3.0
 # HELP vllm:num_requests_waiting Number of requests waiting to be processed.
 # TYPE vllm:num_requests_waiting gauge
-vllm:num_requests_waiting{model_name="llama3"} 7.0
-# HELP vllm:gpu_cache_usage_perc GPU KV cache usage. 1 means 100 percent usage.
-# TYPE vllm:gpu_cache_usage_perc gauge
-vllm:gpu_cache_usage_perc{model_name="llama3"} 0.42
-# HELP vllm:gpu_prefix_cache_hit_rate GPU prefix cache hit rate.
-# TYPE vllm:gpu_prefix_cache_hit_rate gauge
-vllm:gpu_prefix_cache_hit_rate{model_name="llama3"} 0.75
+vllm:num_requests_waiting{engine="0",model_name="deepseek-v4-flash"} 7.0
+# HELP vllm:kv_cache_usage_perc KV-cache usage. 1 means 100 percent usage.
+# TYPE vllm:kv_cache_usage_perc gauge
+vllm:kv_cache_usage_perc{engine="0",model_name="deepseek-v4-flash"} 0.42
+# HELP vllm:prefix_cache_queries_total Prefix cache queries, in queried tokens.
+# TYPE vllm:prefix_cache_queries_total counter
+vllm:prefix_cache_queries_total{engine="0",model_name="deepseek-v4-flash"} 1000.0
+# HELP vllm:prefix_cache_hits_total Prefix cache hits, in cached tokens.
+# TYPE vllm:prefix_cache_hits_total counter
+vllm:prefix_cache_hits_total{engine="0",model_name="deepseek-v4-flash"} 750.0
 # HELP vllm:prompt_tokens_total Number of prefill tokens processed.
 # TYPE vllm:prompt_tokens_total counter
-vllm:prompt_tokens_total{model_name="llama3"} 12000.0
+vllm:prompt_tokens_total{engine="0",model_name="deepseek-v4-flash"} 12000.0
+# HELP vllm:prompt_tokens_by_source_total Number of prompt tokens by source.
+# TYPE vllm:prompt_tokens_by_source_total counter
+vllm:prompt_tokens_by_source_total{model_name="deepseek-v4-flash",source="local_compute"} 12000.0
 # HELP vllm:generation_tokens_total Number of generation tokens processed.
 # TYPE vllm:generation_tokens_total counter
-vllm:generation_tokens_total{model_name="llama3"} 45000.0
+vllm:generation_tokens_total{engine="0",model_name="deepseek-v4-flash"} 45000.0
 # HELP vllm:e2e_request_latency_seconds Histogram of e2e request latency in seconds.
 # TYPE vllm:e2e_request_latency_seconds histogram
-vllm:e2e_request_latency_seconds_sum{model_name="llama3"} 320.5
-vllm:e2e_request_latency_seconds_count{model_name="llama3"} 200.0
+vllm:e2e_request_latency_seconds_sum{engine="0",model_name="deepseek-v4-flash"} 320.5
+vllm:e2e_request_latency_seconds_count{engine="0",model_name="deepseek-v4-flash"} 200.0
 """
 
 
 def test_parse_prometheus_basic():
     raw = _parse_prometheus(SAMPLE_PROMETHEUS)
     assert any("num_requests_running" in k for k in raw)
-    assert any("gpu_cache_usage_perc" in k for k in raw)
+    assert any("kv_cache_usage_perc" in k for k in raw)
 
 
 def test_parse_into_metrics():
@@ -48,10 +56,14 @@ def test_parse_into_metrics():
     assert m.num_requests_running == pytest.approx(3.0)
     assert m.num_requests_waiting == pytest.approx(7.0)
     assert m.gpu_cache_usage_perc == pytest.approx(42.0)
+    # Hit rate derived from counters: 750 / 1000 = 75%.
     assert m.gpu_prefix_cache_hit_rate == pytest.approx(75.0)
+    # _by_source_total must not be double-counted into the prompt total.
     assert m.prompt_tokens_total == pytest.approx(12000.0)
     assert m.generation_tokens_total == pytest.approx(45000.0)
     assert m.e2e_latency_mean_s == pytest.approx(320.5 / 200.0)
+    # Model name recovered from metric labels (no /v1/models call).
+    assert m.model_info.model_id == "deepseek-v4-flash"
 
 
 def test_rate_computation():
