@@ -85,11 +85,21 @@ def test_parse_into_metrics():
 def test_rate_computation():
     poller = MetricsPoller(base_url="http://localhost:8000")
 
-    prev = VllmMetrics(timestamp=0.0, server_reachable=True, generation_tokens_total=1000.0, prompt_tokens_total=500.0)
+    prev = VllmMetrics(
+        timestamp=0.0,
+        server_reachable=True,
+        generation_tokens_total=1000.0,
+        prompt_tokens_total=500.0,
+    )
     poller._prev_metrics = prev
     poller._prev_time = 0.0
 
-    current = VllmMetrics(timestamp=2.0, server_reachable=True, generation_tokens_total=1200.0, prompt_tokens_total=600.0)
+    current = VllmMetrics(
+        timestamp=2.0,
+        server_reachable=True,
+        generation_tokens_total=1200.0,
+        prompt_tokens_total=600.0,
+    )
     poller._compute_rates(current)
 
     assert current.generation_tokens_per_sec == pytest.approx(100.0)

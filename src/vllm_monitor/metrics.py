@@ -89,11 +89,24 @@ class VllmMetrics:
     model_info: ModelInfo = field(default_factory=ModelInfo)
 
 
+def _zero_history() -> deque[float]:
+    """A fixed-size history deque pre-filled with zeros (so sparklines start flat)."""
+    return deque([0.0] * HISTORY_SIZE, maxlen=HISTORY_SIZE)
+
+
 @dataclass
 class MetricsHistory:
-    requests_running: deque[float] = field(default_factory=lambda: deque([0.0] * HISTORY_SIZE, maxlen=HISTORY_SIZE))
-    generation_tps: deque[float] = field(default_factory=lambda: deque([0.0] * HISTORY_SIZE, maxlen=HISTORY_SIZE))
-    gpu_cache: deque[float] = field(default_factory=lambda: deque([0.0] * HISTORY_SIZE, maxlen=HISTORY_SIZE))
+    requests_running: deque[float] = field(default_factory=_zero_history)
+    generation_tps: deque[float] = field(default_factory=_zero_history)
+    gpu_cache: deque[float] = field(default_factory=_zero_history)
+
+
+# Matches "metric_name{labels} value" or "metric_name value"; value may be a
+# float, scientific notation, or NaN/±Inf.
+_METRIC_RE = re.compile(
+    r"^([a-zA-Z_:][a-zA-Z0-9_:]*(?:\{[^}]*\})?)"  # metric name + optional {labels}
+    r"\s+([-+]?[0-9]*\.?[0-9]+(?:[eE][-+]?[0-9]+)?|NaN|[+-]?Inf)\s*$"  # value
+)
 
 
 def _parse_prometheus(text: str) -> dict[str, float]:
@@ -103,8 +116,7 @@ def _parse_prometheus(text: str) -> dict[str, float]:
         line = line.strip()
         if not line or line.startswith("#"):
             continue
-        # Match metric_name{labels} value or metric_name value
-        m = re.match(r'^([a-zA-Z_:][a-zA-Z0-9_:]*(?:\{[^}]*\})?)\s+([-+]?[0-9]*\.?[0-9]+(?:[eE][-+]?[0-9]+)?|NaN|[+-]?Inf)\s*$', line)
+        m = _METRIC_RE.match(line)
         if m:
             name = m.group(1)
             try:
@@ -315,19 +327,24 @@ class MetricsPoller:
             info.cache_dtype = dtype
 
     def _compute_rates(self, current: VllmMetrics) -> None:
-        if self._prev_metrics is None or not self._prev_metrics.server_reachable:
+        prev = self._prev_metrics
+        if prev is None or not prev.server_reachable:
             return
-        dt = current.timestamp - self._prev_metrics.timestamp
+        dt = current.timestamp - prev.timestamp
         if dt <= 0:
             return
-        current.prompt_tokens_per_sec = max(0.0, (current.prompt_tokens_total - self._prev_metrics.prompt_tokens_total) / dt)
-        current.generation_tokens_per_sec = max(0.0, (current.generation_tokens_total - self._prev_metrics.generation_tokens_total) / dt)
+        current.prompt_tokens_per_sec = max(
+            0.0, (current.prompt_tokens_total - prev.prompt_tokens_total) / dt
+        )
+        current.generation_tokens_per_sec = max(
+            0.0, (current.generation_tokens_total - prev.generation_tokens_total) / dt
+        )
 
         # Recent mean latency per histogram: change in sum / change in count
         # since the last poll. Falls back to the cumulative mean from _parse_into.
         for key in LATENCY_HISTOGRAMS:
-            d_count = current.latency_count.get(key, 0.0) - self._prev_metrics.latency_count.get(key, 0.0)
-            d_sum = current.latency_sum.get(key, 0.0) - self._prev_metrics.latency_sum.get(key, 0.0)
+            d_count = current.latency_count.get(key, 0.0) - prev.latency_count.get(key, 0.0)
+            d_sum = current.latency_sum.get(key, 0.0) - prev.latency_sum.get(key, 0.0)
             if d_count > 0 and d_sum >= 0:
                 current.latency_mean_s[key] = d_sum / d_count
 

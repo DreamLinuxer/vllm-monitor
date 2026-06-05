@@ -302,7 +302,9 @@ class VllmMonitorApp(App):
 
         self.query_one("#model-bar", Label).update(_model_bar_markup(m))
 
-        self.query_one("#card-running", MetricCard).update_value(f"[bold white]{m.num_requests_running:.0f}[/bold white]")
+        self.query_one("#card-running", MetricCard).update_value(
+            f"[bold white]{m.num_requests_running:.0f}[/bold white]"
+        )
         # Queued: green when empty, yellow once a backlog forms.
         waiting_color = "green" if m.num_requests_waiting == 0 else "yellow"
         self.query_one("#card-waiting", MetricCard).update_value(
@@ -351,11 +353,19 @@ class VllmMonitorApp(App):
             mean = m.latency_mean_s.get(key, 0.0)
             self.query_one(card_id, MetricCard).update_value(_fmt_latency(mean))
 
-        self.query_one("#card-prompt-tps", MetricCard).update_value(f"[bold white]{m.prompt_tokens_per_sec:.1f}[/bold white]")
-        self.query_one("#card-gen-tps", MetricCard).update_value(f"[bold white]{m.generation_tokens_per_sec:.1f}[/bold white]")
+        self.query_one("#card-prompt-tps", MetricCard).update_value(
+            f"[bold white]{m.prompt_tokens_per_sec:.1f}[/bold white]"
+        )
+        self.query_one("#card-gen-tps", MetricCard).update_value(
+            f"[bold white]{m.generation_tokens_per_sec:.1f}[/bold white]"
+        )
 
-        self.query_one("#card-gpu-cache", MetricCard).update_value(_color_pct(m.gpu_cache_usage_perc, GPU_CACHE_WARN, GPU_CACHE_CRIT))
-        self.query_one("#card-prefix-hit", MetricCard).update_value(f"[bold white]{m.gpu_prefix_cache_hit_rate:.1f}%[/bold white]")
+        self.query_one("#card-gpu-cache", MetricCard).update_value(
+            _color_pct(m.gpu_cache_usage_perc, GPU_CACHE_WARN, GPU_CACHE_CRIT)
+        )
+        self.query_one("#card-prefix-hit", MetricCard).update_value(
+            f"[bold white]{m.gpu_prefix_cache_hit_rate:.1f}%[/bold white]"
+        )
 
         if m.spec_decode_active:
             self.query_one("#card-spec", MetricCard).update_value(
