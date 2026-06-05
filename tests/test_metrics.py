@@ -92,7 +92,6 @@ def test_rate_computation():
         prompt_tokens_total=500.0,
     )
     poller._prev_metrics = prev
-    poller._prev_time = 0.0
 
     current = VllmMetrics(
         timestamp=2.0,

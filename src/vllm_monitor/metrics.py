@@ -187,7 +187,6 @@ class MetricsPoller:
             headers["Authorization"] = f"Bearer {api_key}"
         self._client = httpx.AsyncClient(headers=headers, timeout=5.0)
         self._prev_metrics: VllmMetrics | None = None
-        self._prev_time: float = 0.0
         self.history = MetricsHistory()
 
     async def close(self) -> None:
@@ -208,7 +207,6 @@ class MetricsPoller:
 
         self._update_history(m)
         self._prev_metrics = m
-        self._prev_time = m.timestamp
         return m
 
     async def _fetch_prometheus(self) -> str:
