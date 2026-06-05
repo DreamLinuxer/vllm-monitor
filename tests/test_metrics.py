@@ -6,7 +6,13 @@ from collections import deque
 
 import pytest
 
-from vllm_monitor.metrics import MetricsPoller, VllmMetrics, _parse_prometheus, bar_chart
+from vllm_monitor.metrics import (
+    MetricsPoller,
+    VllmMetrics,
+    _parse_prometheus,
+    bar_chart,
+    render_spark,
+)
 
 # Mirrors the schema emitted by the vLLM v1 engine (engine/model labels,
 # kv_cache_usage_perc, prefix cache counters, no /v1/models needed for the name).
@@ -227,3 +233,40 @@ def test_bar_chart_handles_non_finite():
     rows = bar_chart(deque([0.0, float("nan"), float("inf"), 2.0], maxlen=60), width=4, height=3)
     assert len(rows) == 3
     assert all(len(r) == 4 for r in rows)
+
+
+def test_render_spark_dimensions():
+    lines = render_spark(
+        deque([1.0, 2.0, 3.0], maxlen=60), content_width=30, fmt=lambda v: f"{v:.1f}", height=4
+    )
+    assert len(lines) == 4  # one line per chart row (height)
+    assert all("│" in ln for ln in lines)  # axis gutter + separator on every line
+
+
+def test_render_spark_axis_labels():
+    lines = render_spark(
+        deque([0.0, 5.0, 10.0], maxlen=60), content_width=40, fmt=lambda v: f"{v:.0f}", height=4
+    )
+    assert lines[0].split("│")[0].strip() == "10"  # peak labels the top row
+    assert lines[-1].split("│")[0].strip() == "0"  # zero labels the bottom row
+    gutters = {len(ln.split("│")[0]) for ln in lines}
+    assert len(gutters) == 1  # every row shares the same gutter width
+
+
+def test_render_spark_axis_tracks_visible_window():
+    # Regression: a spike that has scrolled out of the visible window must not
+    # keep inflating the axis "max" — the peak reflects only the drawn slice.
+    values = deque([100.0] + [2.0] * 20, maxlen=60)
+    lines = render_spark(values, content_width=20, fmt=lambda v: f"{v:.0f}", height=4)
+    axis = lines[0].split("│")[0]
+    assert axis.strip() == "2"  # visible-window peak, not the off-screen 100
+    assert len(axis) == 3  # gutter still sized to full-history peak ("100") → no jitter
+
+
+def test_render_spark_all_zero_axis():
+    # All-zero history (the startup state) must not blow up or mislabel.
+    lines = render_spark(
+        deque([0.0] * 60, maxlen=60), content_width=30, fmt=lambda v: f"{v:.0f}", height=4
+    )
+    assert lines[0].split("│")[0].strip() == "0"
+    assert lines[-1].split("│")[0].strip() == "0"

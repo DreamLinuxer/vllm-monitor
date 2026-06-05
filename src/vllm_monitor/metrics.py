@@ -6,6 +6,7 @@ import math
 import re
 import time
 from collections import deque
+from collections.abc import Callable
 from dataclasses import dataclass, field
 
 import httpx
@@ -358,3 +359,41 @@ def bar_chart(values: deque[float], width: int = 20, height: int = 4) -> list[st
         if rem and full < height:
             grid[height - 1 - full][col] = blocks[rem]
     return ["".join(row) for row in grid]
+
+
+def render_spark(
+    values: deque[float],
+    content_width: int,
+    fmt: Callable[[float], str],
+    height: int,
+) -> list[str]:
+    """Render a labeled bar chart; each line is ``"<axis>│<bars>"``.
+
+    `fmt` formats the axis numbers (peak at the top row, ``0`` at the bottom).
+
+    The y-axis peak is derived from the same trailing window ``bar_chart``
+    draws (the last ``chart_w`` samples), *not* the whole deque — otherwise a
+    spike that has scrolled off the visible chart keeps inflating the "max"
+    label until it ages out of ``HISTORY_SIZE``. The gutter, however, is sized
+    off the full-history peak so the chart width doesn't jitter as values move.
+    """
+    finite_all = [v for v in values if math.isfinite(v)]
+    provisional = fmt(max(finite_all) if finite_all else 0.0)
+    gutter = max(len(provisional), 1)
+    # Fit the chart to the available width, leaving room for the axis.
+    avail = max(content_width, gutter + 9)
+    chart_w = max(8, avail - gutter - 1)
+    window = [v for v in list(values)[-chart_w:] if math.isfinite(v)]
+    peak = max(window) if window else 0.0
+    top = fmt(peak)
+    rows = bar_chart(values, chart_w, height)
+    lines = []
+    for i, row in enumerate(rows):
+        if i == 0:
+            axis = top.rjust(gutter)
+        elif i == len(rows) - 1:
+            axis = "0".rjust(gutter)
+        else:
+            axis = " " * gutter
+        lines.append(f"{axis}│{row}")
+    return lines

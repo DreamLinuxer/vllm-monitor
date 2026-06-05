@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import math
 from collections import deque
 from collections.abc import Callable
 
@@ -13,7 +12,7 @@ from textual.containers import Container, Horizontal, VerticalScroll
 from textual.reactive import reactive
 from textual.widgets import Footer, Header, Label, Static
 
-from .metrics import MetricsPoller, VllmMetrics, bar_chart
+from .metrics import MetricsPoller, VllmMetrics, render_spark
 
 # Vertical resolution of the history charts, in text rows.
 CHART_HEIGHT = 5
@@ -150,30 +149,7 @@ class SparklineCard(Static):
         `fmt` formats the axis numbers (peak at top, 0 at bottom); `caption`
         is the line shown beneath the chart (e.g. the current value).
         """
-        # The axis peak must reflect the same window bar_chart renders, not the
-        # whole deque — otherwise a spike that has scrolled off the visible chart
-        # keeps inflating the "max" label until it ages out of HISTORY_SIZE.
-        # Compute the chart width first (using a provisional gutter), then derive
-        # the peak from that trailing slice.
-        finite_all = [v for v in values if math.isfinite(v)]
-        provisional = fmt(max(finite_all) if finite_all else 0.0)
-        gutter = max(len(provisional), 1)
-        # Fit the chart to the card's content width, leaving room for the axis.
-        avail = max(self.content_size.width, gutter + 9)
-        chart_w = max(8, avail - gutter - 1)
-        window = [v for v in list(values)[-chart_w:] if math.isfinite(v)]
-        peak = max(window) if window else 0.0
-        top = fmt(peak)
-        rows = bar_chart(values, chart_w, CHART_HEIGHT)
-        lines = []
-        for i, row in enumerate(rows):
-            if i == 0:
-                axis = top.rjust(gutter)
-            elif i == len(rows) - 1:
-                axis = "0".rjust(gutter)
-            else:
-                axis = " " * gutter
-            lines.append(f"{axis}│{row}")
+        lines = render_spark(values, self.content_size.width, fmt, CHART_HEIGHT)
         self.query_one(f"#{self.id}-spark", Label).update("\n".join(lines))
         self.query_one(f"#{self.id}-label", Label).update(caption)
 
