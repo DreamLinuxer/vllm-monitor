@@ -236,6 +236,10 @@ class VllmMonitorApp(App):
         super().__init__(**kwargs)
         self._poller = poller
         self._interval = interval
+        # Guards against overlapping polls: the periodic timer awaits each tick,
+        # but a manual refresh (action_refresh) runs on a separate task and could
+        # otherwise start a second poll() while one is still in flight.
+        self._tick_busy = False
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -278,7 +282,17 @@ class VllmMonitorApp(App):
         self.set_interval(self._interval, self._tick)
         self.call_after_refresh(self._tick)
 
+    async def on_unmount(self) -> None:
+        # Release the HTTP connection pool on shutdown (avoids a ResourceWarning).
+        await self._poller.close()
+
     async def _tick(self) -> None:
+        # Drop overlapping triggers: if a poll is already in flight (e.g. a manual
+        # refresh landing mid-tick), skip rather than corrupt the poller's
+        # prev-sample / history state with a concurrent poll().
+        if self._tick_busy:
+            return
+        self._tick_busy = True
         # Never let a single bad sample or render error tear down the app —
         # log it and keep the dashboard running for the next tick.
         try:
@@ -287,6 +301,8 @@ class VllmMonitorApp(App):
             self._update_ui(m)
         except Exception as exc:  # noqa: BLE001 - last-resort UI guard
             self.log.error(f"tick failed: {exc!r}")
+        finally:
+            self._tick_busy = False
 
     def _update_ui(self, m: VllmMetrics) -> None:
         status = self.query_one("#status-bar", Label)

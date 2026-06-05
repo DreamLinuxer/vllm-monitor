@@ -8,6 +8,7 @@ points at an unreachable address so poll() returns offline metrics.
 
 from __future__ import annotations
 
+import asyncio
 from collections import deque
 
 import pytest
@@ -207,6 +208,43 @@ async def test_header_icon_removed():
         await pilot.pause()
         assert app.query_one(Header).icon == ""
     await app._poller.close()
+
+
+async def test_refresh_does_not_overlap_inflight_poll():
+    """A manual refresh landing mid-poll must not start a second concurrent
+    poll() — that would corrupt the poller's prev-sample / history state."""
+    app = _make_app()
+    calls = 0
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    async def slow_poll() -> VllmMetrics:
+        nonlocal calls
+        calls += 1
+        started.set()
+        await release.wait()
+        return VllmMetrics()
+
+    async with app.run_test():
+        app._poller.poll = slow_poll  # type: ignore[method-assign]
+        first = asyncio.create_task(app._tick())
+        await started.wait()  # first poll is now in flight
+        await app._tick()  # overlapping trigger — must be dropped
+        assert calls == 1
+        release.set()
+        await first
+        assert calls == 1  # still only the one poll ran
+    await app._poller.close()
+
+
+async def test_poller_closed_on_app_exit():
+    """The app closes its poller's HTTP client on shutdown (no ResourceWarning)."""
+    app = _make_app()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        assert not app._poller._client.is_closed
+    # Leaving the run_test context unmounts the app, which must close the client.
+    assert app._poller._client.is_closed
 
 
 async def test_tick_survives_poll_error():
